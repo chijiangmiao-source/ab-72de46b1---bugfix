@@ -1,0 +1,34 @@
+services:
+  audit:
+    build:
+      context: .
+      target: runtime
+    image: photomask-audit:latest
+    environment:
+      # Container-internal listen port (the image exposes 8000).
+      PORT: "8000"
+    # Host port is configurable via AUDIT_HOST_PORT (default 8080).
+    ports:
+      - "${AUDIT_HOST_PORT:-8080}:8000"
+    healthcheck:
+      test: ["CMD", "python", "-m", "app.healthcheck"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+      start_period: 3s
+    restart: unless-stopped
+
+  verify:
+    build:
+      context: .
+      target: verify
+    image: photomask-audit-verify:latest
+    depends_on:
+      audit:
+        condition: service_healthy
+    environment:
+      AUDIT_URL: "http://audit:8000"
+    # One-shot gate: tests + build check + HTTP smoke, then exits;
+    # `docker compose up --exit-code-from verify` (or the default
+    # `docker compose run verify`) reports its exit code.
+    restart: "no"
