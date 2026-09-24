@@ -11,6 +11,8 @@ Runs, in order, and reports a single process exit code:
    * overlapping boxes  -> area 10, perimeter 14;
    * edge-adjacent boxes -> the common edge is not perimeter;
    * geometric duplicates -> no increment;
+   * 64 dense same-start boxes (32+32 overlap/containment) -> area 25,
+     perimeter 34, count 64;
    * duplicate id -> 422 with a position-tagged error.
 
 The container exits 0 only when every stage passes.
@@ -176,6 +178,24 @@ def run_smoke() -> bool:
         ok &= check(
             body.get("area") == "8" and body.get("perimeter") == "12",
             f"mixed same-coordinate events adjudicated together (got {body})",
+        )
+
+        # Dense same-start batch: 32 boxes [0,1]x[0,10] plus 32 boxes
+        # [0,2]x[5,15] with distinct ids (geometric repetition is legal).
+        # All 64 enter at x=0 with overlapping/contained vertical ranges;
+        # cover-count multiplicity must survive the dense batch.
+        dense = [_r(f"s{i}", 0, 0, 1, 10) for i in range(32)]
+        dense += [_r(f"t{i}", 0, 5, 2, 15) for i in range(32)]
+        resp = _post(client, dense)
+        body = resp.json() if resp.status_code == 200 else {}
+        ok &= check(
+            resp.status_code == 200
+            and body.get("count") == 64
+            and body.get("area") == "25"
+            and body.get("perimeter") == "34",
+            "64 dense same-start boxes (32+32 overlap/containment) -> "
+            "count=64 area=25 perimeter=34 "
+            f"(got {resp.status_code} {resp.text[:200]})",
         )
 
         # Results must be decimal strings even at 1e9 scale.

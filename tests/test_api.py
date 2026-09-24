@@ -140,6 +140,18 @@ def test_audit_large_value_returned_as_decimal_string(client):
     assert resp.json()["perimeter"] == str(8 * 10**9)
 
 
+def test_audit_dense_same_start_batch(client):
+    # 32 boxes [0,1]x[0,10] + 32 boxes [0,2]x[5,15], distinct ids; all 64
+    # share the entering x coordinate with overlapping/contained y ranges.
+    rects = [rect(f"s{i}", 0, 0, 1, 10) for i in range(32)]
+    rects += [rect(f"t{i}", 0, 5, 2, 15) for i in range(32)]
+    resp = client.post("/api/audit", json={"rectangles": rects})
+    assert resp.status_code == 200
+    # count/area/perimeter reconcile: union 10+20-5 = 25; count echoes all
+    # 64 accepted identities; values stay decimal strings.
+    assert resp.json() == {"count": 64, "area": "25", "perimeter": "34"}
+
+
 def test_audit_rejects_when_not_ready(client):
     readiness.engine_ready = False
     try:

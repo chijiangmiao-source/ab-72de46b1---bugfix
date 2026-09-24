@@ -133,33 +133,6 @@ class _CoverageTree:
         return self.length[1]
 
 
-_BATCH_COMPACTION_THRESHOLD = 32
-
-
-def _compact_dense_batch(
-    events: list[tuple[int, int, int, int]], start: int, end: int
-) -> list[tuple[int, int, int, int]]:
-    """Reduce a dense same-coordinate batch before updating the tree."""
-    compacted: list[tuple[int, int, int, int]] = []
-    for kind in (1, 0):
-        spans = sorted(
-            (events[i][2], events[i][3])
-            for i in range(start, end)
-            if events[i][1] == kind
-        )
-        if not spans:
-            continue
-        lo, hi = spans[0]
-        for next_lo, next_hi in spans[1:]:
-            if next_lo <= hi:
-                hi = max(hi, next_hi)
-                continue
-            compacted.append((events[start][0], kind, lo, hi))
-            lo, hi = next_lo, next_hi
-        compacted.append((events[start][0], kind, lo, hi))
-    return compacted
-
-
 def _sweep(rects: list[Rect]) -> tuple[int, int]:
     """Sweep rectangles along their first axis.
 
@@ -198,15 +171,21 @@ def _sweep(rects: list[Rect]) -> tuple[int, int]:
         batch_end = i + 1
         while batch_end < n_events and events[batch_end][0] == x:
             batch_end += 1
-        if batch_end - i >= _BATCH_COMPACTION_THRESHOLD:
-            batch = _compact_dense_batch(events, i, batch_end)
-        else:
-            batch = events[i:batch_end]
         # Apply the whole batch at x; enters before leaves.  The summed
         # covered-length flips equal the before/after symmetric-difference
         # measure, i.e. the exposed edge at x.
+        #
+        # Every individual event must reach the tree: cover counts carry
+        # multiplicity, so merging a dense same-direction batch into one
+        # range add would be wrong (32 identical enters must stack to a
+        # cover count of 32, not 1).  Within each phase the per-cell cover
+        # count only moves one way, so each cell flips zero/non-zero at
+        # most once per phase and summing the per-update flips is exact:
+        # a cell one rectangle leaves and another enters while coverage
+        # persists never flips, so touching edges form no interior seam.
         batch_flips = 0
-        for _, kind, lo, hi in batch:
+        for j in range(i, batch_end):
+            _, kind, lo, hi = events[j]
             batch_flips += tree.add(lo, hi, 1 if kind else -1)
         cross_boundary += batch_flips
         i = batch_end

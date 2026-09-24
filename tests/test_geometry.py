@@ -83,6 +83,81 @@ def test_events_at_same_coordinate_are_adjudicated_together():
     ) == Metrics(18, 22)
 
 
+def test_dense_same_start_32_plus_32_fixture():
+    # 光刻版复核场景: 32 boxes covering [0,1] x [0,10] and 32 boxes
+    # covering [0,2] x [5,15], all 64 entering at the same x coordinate
+    # with overlapping/contained vertical ranges.  Geometric repetition is
+    # legal; the sweep must preserve cover-count multiplicity (a dense
+    # same-coordinate batch used to be merged into one range add, which
+    # collapsed the 32 stacked enters to a cover count of 1 and dropped
+    # coverage of the shared neck at x=1 -> area came out as 20).
+    rects = [Rect(0, 0, 1, 10) for _ in range(32)]
+    rects += [Rect(0, 5, 2, 15) for _ in range(32)]
+    got = compute_metrics(rects)
+    # Duplicates never change a union: identical to the two-shape union.
+    assert got == metrics_of((0, 0, 1, 10), (0, 5, 2, 15))
+    # 10 + 20 - 5 shared = 25.
+    assert got.area == 25
+    # L-shaped union: vertical runs 15 (x=0) + 5 (neck step at x=1) +
+    # 10 (x=2) = 30; horizontal runs 1 + 1 + 2 = 4; total 34.  The
+    # perimeter of any lattice polyomino is even (4A = P + 2S), so an
+    # odd value such as 29 is impossible for this union.
+    assert got.perimeter == 34
+    area, perim = raster_metrics(rects)
+    assert (got.area, got.perimeter) == (area, perim)
+
+
+@pytest.mark.parametrize("copies", [1, 32, 33])
+@pytest.mark.parametrize(
+    "a,b",
+    [
+        ((0, 0, 2, 5), (0, 2, 4, 7)),   # overlapping vertical ranges
+        ((0, 0, 2, 5), (0, 5, 4, 9)),   # tangent at y=5 (seam not exposed)
+        ((0, 0, 2, 10), (0, 2, 2, 8)),  # b fully contained, x edges flush
+    ],
+)
+def test_same_x_overlap_tangent_containment_with_multiplicity(a, b, copies):
+    # Dense batches at the same starting x: multiplicity must not alter the
+    # union, and the tangent edge must never become interior perimeter.
+    rects = [Rect(*a)] * copies + [Rect(*b)] * copies
+    got = compute_metrics(rects)
+    assert got == compute_metrics([Rect(*a), Rect(*b)])
+    area, perim = raster_metrics(rects)
+    assert got == Metrics(area, perim)
+
+
+def test_dense_cover_multiplicity_matches_reference_on_both_axes():
+    # Same shapes repeated >= the old 32-event compaction threshold so that
+    # both sweeps (x and the swapped y sweep) see oversized batches; leave
+    # and enter batches exercise removals as well as additions.
+    rng = random.Random(72)
+    base_specs = [
+        (0, 0, 1, 10),
+        (0, 5, 2, 15),
+        (-2, 7, 3, 12),
+        (1, 0, 2, 6),
+    ]
+    for copies in (1, 31, 32, 40):
+        rects = [Rect(*s) for s in base_specs for _ in range(copies)]
+        got = compute_metrics(rects)
+        area, perim = raster_metrics(rects)
+        assert got == Metrics(area, perim)
+    # Random multiplicities on a small, collision-heavy coordinate set.
+    for _ in range(40):
+        base = []
+        for _ in range(rng.randint(1, 6)):
+            x0 = rng.choice([-2, 0, 0, 3])
+            y0 = rng.choice([-2, 0, 0, 4])
+            base.append(
+                Rect(x0, y0, x0 + rng.choice([1, 2, 5]), y0 + rng.choice([1, 2, 5]))
+            )
+        copies = rng.choice([1, 16, 32, 40])
+        rects = [r for r in base for _ in range(copies)]
+        got = compute_metrics(rects)
+        area, perim = raster_metrics(rects)
+        assert got == Metrics(area, perim)
+
+
 def test_disconnected_components_perimeter_adds():
     # Two disjoint squares: perimeter 8+8=16.
     assert metrics_of((0, 0, 1, 1), (10, 10, 11, 11)) == Metrics(2, 8)
